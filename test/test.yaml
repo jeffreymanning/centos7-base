@@ -1,0 +1,48 @@
+kind: Template
+apiVersion: v1
+template: centos7-test
+metadata:
+  name: centos7-test
+labels:
+  app: centos7-test
+objects:
+
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: ${API_NAME}
+    labels:
+      cluster: ${CLUSTER_NAME}
+      type: test
+  spec:
+    strategy:
+      type: Rolling
+    triggers:
+      - type: ConfigChange
+    replicas: 1
+    selector:
+      name: ${API_NAME}
+    template:
+      metadata:
+        labels:
+          name: ${API_NAME}
+      spec:
+        containers:
+          - name: ${API_NAME}
+            image: ${API_IMAGE}
+            imagePullPolicy: "Always"
+
+parameters:
+- name: CLUSTER_NAME
+  description: name of cluster - applicable to spark infrastructure
+  generate: expression
+  from: "cluster-[a-z0-9]{4}"
+  required: true
+- name: API_NAME
+  description: name of api node - spark-submit, spark-class command line operations
+  generate: expression
+  from: "api-node-[a-z0-9]{4}"
+  required: true
+- name: API_IMAGE
+  description: Name of the API image (submit or shell)
+  value: docker.io/jeffreymanning/centos7-base:latest

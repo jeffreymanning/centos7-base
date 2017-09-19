@@ -2,15 +2,31 @@ FROM centos:centos7
 
 MAINTAINER Jeff Manning
 
+## Atomic/OpenShift Labels - https://github.com/projectatomic/ContainerApplicationGenericLabels
+LABEL name="centos7" \
+      vendor="MITRE Corp" \
+      version="1.1" \
+      release="1" \
+      summary="MITRE's base 7 image, Oracle Java, Maven" \
+      description="Centos7, Oracle Java, Maven root image" \
+### Required labels above - recommended below
+      run='docker run -tdi --name ${NAME} ${IMAGE}' \
+      io.k8s.description="Centos, Oracle Java, Maven base image" \
+      io.k8s.display-name="centos, java, maven" \
+      io.openshift.expose-services="" \
+      io.openshift.tags="centos7,java,maven"
+
 USER root
 
 #install the basic packages, must install sudo - some downstream consumers cannot run as root
+# cleans/runs must match to avoid yum caches (bloat) in a layer
 RUN yum clean all && \
     yum -y update && \
     yum -y install sudo && \
-    yum clean all
-RUN yum install -y tar wget curl net-tools build-essential git wget zip unzip vim && \
-    yum clean all
+    yum clean all -y
+RUN INSTALL_PKGS="wget curl net-tools build-essential git wget zip unzip vim" && \
+    yum install -y --setopt=tsflags=nodocs ${INSTALL_PKGS} && \
+    yum clean all -y
 
 
 ### Install Java 8
@@ -55,16 +71,44 @@ RUN curl -sL ${MAVEN_REPO}/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSIO
   | tar x -C /usr/ \
   && ln -s $MAVEN_HOME /usr/maven
 
-#### define working directory.
-RUN mkdir -p /data
-COPY . /data
-VOLUME "/data"
-WORKDIR /data
+### Setup user for build execution and application runtime
+# see https://github.com/RHsyseng/container-rhel-examples/blob/master/starter-epel/Dockerfile
+ENV APP_ROOT=/opt/app-root \
+    USER_NAME=default \
+    USER_UID=10001
+ENV APP_HOME=${APP_ROOT}/src  PATH=$PATH:${APP_ROOT}/bin
+RUN mkdir -p ${APP_HOME}
+COPY bin/ ${APP_ROOT}/bin/
 
-RUN groupadd -r spark && groupadd -r staff && useradd --no-log-init -r -g spark spark
-RUN usermod -aG wheel spark
-RUN usermod -aG staff spark
-RUN chown -R -L spark:spark /data
+
+# see https://docs.openshift.org/latest/creating_images/guidelines.html
+# By default, OpenShift Origin runs containers using an arbitrarily assigned user ID. This provides additional
+# security against processes escaping the container due to a container engine vulnerability and thereby achieving
+# escalated permissions on the host node.
+
+# For an image to support running as an arbitrary user, directories and files that may be written to by
+# processes in the image should be owned by the root group and be read/writable by that group.
+# Files to be executed should also have group execute permissions.
+
+# group 0 is the root group..  this is not root privs
+# works later down docker layer chain with mounted volumes
+RUN chmod -R ug+x ${APP_ROOT}/bin && sync && \
+    useradd -l -u ${USER_UID} -r -g 0 -d ${APP_ROOT} -s /sbin/nologin -c "${USER_NAME} user" ${USER_NAME} && \
+    chown -R ${USER_UID}:0 ${APP_ROOT} && \
+    chmod -R g=u ${APP_ROOT}
+
+####### Add app-specific needs below. #######
+### Containers should NOT run as root as a good practice
+USER 10001
+WORKDIR ${APP_ROOT}
+CMD run
+
+# older way...
+# moved back into specific layers (until needed)
+#RUN groupadd -r spark && groupadd -r staff && useradd --no-log-init -r -g spark spark
+#RUN usermod -aG wheel spark
+#RUN usermod -aG staff spark
+#RUN chown -R -L spark:spark /data
 
 # testing
 #USER spark
