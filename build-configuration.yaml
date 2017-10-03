@@ -1,0 +1,79 @@
+kind: Template
+apiVersion: v1
+template: build-centos7-base
+metadata:
+  name: build-centos7-base
+labels:
+  app: build-centos7-base
+objects:
+
+- kind: BuildConfig
+  apiVersion: v1
+  metadata:
+    name: ${NAME}
+    annotations:
+      description: Define Centos7 base image build
+  spec:
+    runPolicy: Serial
+    strategy:
+      type: Docker
+      dockerStrategy:
+        from:
+          kind: ImageStreamTag
+          name: ${ROOT}:${ROOT}7
+    source:
+# if non-root git directory, need to specifiy the context dir
+#     contextDir: ${CONTEXT_DIR}
+      git:
+        ref: ${SOURCE_REPOSITORY_REF}
+        uri: ${SOURCE_REPOSITORY_URL}
+    output:
+      to:
+        kind: ImageStreamTag
+        name: ${NAME}:latest
+
+- kind: ImageStream
+  apiVersion: v1
+  metadata:
+    annotations:
+      description: Keeps track of changes in the centos7-base image
+    name: ${NAME}
+
+- kind: ImageStream
+  apiVersion: v1
+  metadata:
+    annotations:
+      description: Keeps track of changes in the centos7 image
+    name: ${ROOT}7
+  spec:
+    tags:
+      - from:
+          kind: DockerImage
+          name: ${ROOT}:${ROOT}7
+
+parameters:
+- name: NAME
+  displayName: Name
+  description: The name assigned to object defined in this template.
+  required: true
+  value: centos7-base
+- name: ROOT
+  displayName: Root
+  description: The root objects defined in this template.
+  required: true
+  value: centos
+- name: SOURCE_REPOSITORY_URL
+  displayName: Git Repository URL
+  description: The URL of the repository
+  required: true
+  value: https://github.com/jeffreymanning/centos7-base.git
+- name: SOURCE_REPOSITORY_REF
+  description: The reference of the repository (master, v1,...)
+  displayName: Git Repository
+  required: true
+  value: master
+- name: CONTEXT_DIR
+  displayName: Git Sub directory path iff
+  description: Set this to the relative path to your project if it is not in the root of your repository.
+  required: false
+  value: sub-dir
