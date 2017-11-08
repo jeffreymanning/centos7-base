@@ -14,7 +14,7 @@ LABEL name="centos7" \
       run='docker run -tdi --name ${NAME} ${IMAGE}' \
       io.k8s.description="Centos, Oracle Java, Maven base image" \
       io.k8s.display-name="centos, java, maven" \
-      io.openshift.expose-services="" \
+      io.openshift.expose-services="centos7" \
       io.openshift.tags="centos7,java,maven"
 
 USER root
@@ -24,18 +24,36 @@ USER root
 RUN yum clean all && \
     yum -y update && \
     yum -y install sudo && \
-    yum clean all -y
-RUN INSTALL_PKGS="wget curl net-tools build-essential git wget zip unzip vim" && \
+    yum -y install deltarpm && \
+    yum clean all -y && \
+# openssl, see
+#    https://hub.docker.com/r/becivells/centos/
+#    https://superuser.com/questions/1202611/forward-x11-over-an-ssh-connection-to-containers-host
+#    https://www.nikhef.nl/~mjg/xhost_plus.html
+#    http://olivier.barais.fr/blog/posts/2014.08.26/Eclipse_in_docker_container.html
+    INSTALL_SYSTEM_PKGS="openssl openssl-devel openssh-server libcurl libcurl-devel" && \
+    yum install -y --setopt=tsflags=nodocs ${INSTALL_SYSTEM_PKGS} && \
+    INSTALL_PKGS="wget curl net-tools git wget zip unzip vim" && \
     yum install -y --setopt=tsflags=nodocs ${INSTALL_PKGS} && \
-    yum clean all -y
-
+# see https://access.redhat.com/sites/default/files/attachments/x11_forwarding_over_ssh.pdf
+# install a minimal server environment while still allowing for the use of
+# graphical applications through a client securely connected to your server over the network via SSH.
+    INSTALL_X11_FWD="xorg-x11-xauth xorg-x11-fonts-* xorg-x11-utils" && \
+    yum install -y --setopt=tsflags=nodocs ${INSTALL_X11_FWD} && \
+    yum clean all -y && \
+# x11 forwardeing
+    sed -i "s/#[ ]*ForwardX11[ ]*no/ForwardX11 yes/" /etc/ssh/ssh_config &&\
+    sed -i "/[ ]*ForwardX11[ ]*yes/a X11Forwarding yes" /etc/ssh/ssh_config && \
+    sed -i "s/#[ ]*AddressFamily.*/AddressFamily inet/" /etc/ssh/ssh_config
+# this didn't work
+#    sed -i "s/#[ ]*X11Forwarding[ ]*no/X11Forwarding yes/" /etc/ssh/sshd_config
 
 ### Install Java 8
 #### Per version variables (Need to find out from http://java.oracle.com site for every update)
 ARG JAVA_MAJOR_VERSION=8
-ARG JAVA_UPDATE_VERSION=144
-ARG JAVA_BUILD_NUMBER=01
-ARG JAVA_TOKEN=090f390dda5b47b9b721c7dfaa008135
+ARG JAVA_UPDATE_VERSION=151
+ARG JAVA_BUILD_NUMBER=12
+ARG JAVA_TOKEN=e758a0de34e24606bca991d704f6dcbf
 ARG UPDATE_VERSION=${JAVA_MAJOR_VERSION}u${JAVA_UPDATE_VERSION}
 ARG BUILD_VERSION=b${JAVA_BUILD_NUMBER}
 ARG JAVA_JDK_HREF_ROOT="http://download.oracle.com/otn-pub/java/jdk/${UPDATE_VERSION}-${BUILD_VERSION}/${JAVA_TOKEN}"
@@ -75,7 +93,7 @@ RUN curl -sL ${MAVEN_REPO}/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSIO
 # see https://github.com/RHsyseng/container-rhel-examples/blob/master/starter-epel/Dockerfile
 ENV APP_ROOT=/opt/app-root
 ENV USER_NAME=default
-ENV USER_UID=1001
+ENV USER_UID=1000
 ENV APP_HOME=${APP_ROOT}/src
 ENV PATH=$PATH:${APP_ROOT}/bin
 RUN mkdir -p ${APP_HOME}
@@ -96,21 +114,33 @@ COPY bin/ ${APP_ROOT}/bin/
 # umask 0022 vs 002 note
 #   by setting -M (or -m) -d ${APP_ROOT} or -s /etc/nologin /etc/profile are not called resulting in 0022 setting
 RUN chmod -R ug+x ${APP_ROOT}/bin && sync && \
-    groupadd -r ${USER_NAME}  && \
+#    groupadd -r ${USER_NAME}  && \
 #    useradd -l -u ${USER_UID} -r -g 0 -d ${APP_ROOT} -s /sbin/nologin -c "${USER_NAME} user" ${USER_NAME} && \
+    groupadd -g ${USER_UID} ${USER_NAME}  && \
 #    usermod -aG ${USER_NAME}  ${USER_NAME}  && \
     useradd -u ${USER_UID} -g ${USER_NAME} ${USER_NAME} && \
-    usermod -aG 0  ${USER_NAME}  && \
-#    echo 'default:' | chpasswd && \
-    chown -R ${USER_UID}:0 ${APP_ROOT} && \
+    usermod -aG root  ${USER_NAME}  && \
+    usermod -aG wheel ${USER_NAME} && \
+    chown -R ${USER_NAME}:root ${APP_ROOT} && \
     chmod -R g=u ${APP_ROOT}
 
 ### create a back door to get effective root
 # see http://blog.dscpl.com.au/2016/12/backdoors-for-becoming-root-in-docker.html
+# see https://github.com/fgrehm/docker-netbeans/blob/master/Dockerfile
 # Allow anyone in group 'root' to use 'sudo' without a password.
-RUN echo '%root ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+RUN echo 'default:' | chpasswd && \
+    echo 'root:' | chpasswd && \
+#    echo "{USER_NAME} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
+# ls echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && \
+#    echo '%root ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && \
+    sed -i -e "s/[ ]*Defaults[ ]*requiretty/#Defaults    requiretty/" /etc/sudoers && \
+#    sed -i -e "s/#[ ]*includedir/includerdir/" /etc/sudoers && \
+    echo "%${USER_NAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USER_NAME} && \
+    chmod 0440 /etc/sudoers.d/${USER_NAME}
 # Set the password for the 'root' user to be an empty string.
-RUN echo 'root:' | chpasswd
+
+# setup the display variable
+ENV DISPLAY=""
 
 ####### Add app-specific needs below. #######
 ### Containers should NOT run as root as a good practice
