@@ -20,7 +20,7 @@ objects:
       dockerStrategy:
         from:
           kind: ImageStreamTag
-          name: ${ROOT}:${ROOT}7
+          name: ${ROOT}:latest
     source:
 # if non-root git directory, need to specifiy the context dir
 #     contextDir: ${CONTEXT_DIR}
@@ -44,12 +44,12 @@ objects:
   metadata:
     annotations:
       description: Keeps track of changes in the centos7 image
-    name: ${ROOT}7
+    name: ${ROOT}
   spec:
     tags:
       - from:
           kind: DockerImage
-          name: ${ROOT}:${ROOT}7
+          name: docker.io/${ROOT}
 
 parameters:
 - name: NAME
